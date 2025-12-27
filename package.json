@@ -1,0 +1,13 @@
+{
+  "name": "eternal-playlist",
+  "private": true,
+  "scripts": {
+    "dev": "pnpm --filter api dev",
+    "build": "pnpm --filter api build",
+    "typecheck": "pnpm -r typecheck",
+    "lint": "pnpm -r lint"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}
