@@ -10,6 +10,7 @@
   },
   "dependencies": {
     "@eternal-playlist/shared": "workspace:*",
+    "@eternal-playlist/database": "workspace:*",
     "fastify": "^5.2.1"
   },
   "devDependencies": {
