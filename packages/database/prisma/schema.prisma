@@ -1,0 +1,162 @@
+// The Eternal Playlist - Database Schema
+// Generated from domain modeling session: December 28, 2025
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ===========================================
+// USER CONTEXT
+// ===========================================
+
+enum UserStatus {
+  onboarding  // First 10 prompts, long message format
+  active      // Normal operation
+  paused      // User paused notifications
+  anonymized  // Account deleted, data kept for research
+}
+
+model User {
+  id        String     @id @default(uuid())
+  status    UserStatus @default(onboarding)
+  createdAt DateTime   @default(now()) @map("created_at")
+
+  // Relations (Value Objects)
+  pii          UserPii?
+  demographics UserDemographics?
+  preferences  UserPreferences?
+
+  // Relations (to other Aggregates)
+  cycles    Cycle[]
+  responses Response[]
+
+  @@map("users")
+}
+
+// PII - Personally Identifiable Information
+// ALWAYS deleted on anonymization
+model UserPii {
+  userId         String  @id @map("user_id")
+  phone          String  @unique
+  firstName      String  @map("first_name")
+  lastName       String  @map("last_name")
+  nickname       String?
+  email          String? @unique
+  referralSource String? @map("referral_source") // "How did you hear about us?"
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("users_pii")
+}
+
+// Demographics - Descriptive data for research
+// Kept if user consents to anonymized data contribution
+model UserDemographics {
+  userId      String @id @map("user_id")
+  birthday    DateTime @db.Date
+  gender      Gender
+  nationality String // ISO 3166-1 alpha-2 (e.g., "IT", "DE")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("users_demographics")
+}
+
+enum Gender {
+  male
+  female
+  non_binary  @map("non-binary")
+  undisclosed
+}
+
+// Preferences - User configuration
+// Deleted on anonymization (not research-relevant)
+model UserPreferences {
+  userId           String       @id @map("user_id")
+  timezone         String       // IANA timezone (e.g., "Europe/Rome")
+  activeHoursStart String       @map("active_hours_start") // "08:00"
+  activeHoursEnd   String       @map("active_hours_end")   // "22:00"
+  samplingMode     SamplingMode @default(weekly) @map("sampling_mode")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("users_preferences")
+}
+
+// ===========================================
+// SAMPLING CONTEXT
+// ===========================================
+
+enum SamplingMode {
+  weekly
+  daily
+}
+
+enum CycleStatus {
+  active
+  completed
+  incomplete // User paused mid-cycle
+}
+
+model Cycle {
+  id                    String       @id @default(uuid())
+  userId                String       @map("user_id")
+  mode                  SamplingMode
+  validityWindowMinutes Int          @map("validity_window_minutes")
+  startsAt              DateTime     @map("starts_at")
+  endsAt                DateTime     @map("ends_at")
+  status                CycleStatus  @default(active)
+
+  user    User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  prompts Prompt[]
+
+  @@map("cycles")
+}
+
+enum PromptStatus {
+  scheduled
+  sent
+  missed // Failed to send (delivery failure, system error)
+}
+
+model Prompt {
+  id           String       @id @default(uuid())
+  cycleId      String       @map("cycle_id")
+  windowNumber Int          @map("window_number") // 1-3 for weekly, 1-2 for daily
+  scheduledAt  DateTime     @map("scheduled_at")
+  sentAt       DateTime?    @map("sent_at")
+  status       PromptStatus @default(scheduled)
+
+  cycle    Cycle     @relation(fields: [cycleId], references: [id], onDelete: Cascade)
+  response Response?
+
+  @@map("prompts")
+}
+
+// ===========================================
+// RESPONSES CONTEXT
+// ===========================================
+
+enum ResponseValue {
+  yes
+  no
+}
+
+model Response {
+  id         String         @id @default(uuid())
+  userId     String         @map("user_id")
+  promptId   String         @unique @map("prompt_id")
+  value      ResponseValue?
+  receivedAt DateTime?      @map("received_at")
+  isValid    Boolean        @map("is_valid")
+
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  prompt Prompt @relation(fields: [promptId], references: [id], onDelete: Cascade)
+
+  @@map("responses")
+}
