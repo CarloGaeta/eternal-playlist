@@ -4,6 +4,7 @@ on:
   push:
     branches: [main]
   pull_request:
+    branches: [main]
 
 jobs:
   check:
@@ -22,4 +23,5 @@ jobs:
           cache: 'pnpm'
           
       - run: pnpm install
+      - run: pnpm --filter @eternal-playlist/database db:generate
       - run: pnpm typecheck
