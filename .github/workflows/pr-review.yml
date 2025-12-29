@@ -165,19 +165,21 @@ jobs:
             const architecture = process.env.ARCHITECTURE_RESULT;
             const quality = process.env.QUALITY_RESULT;
 
-            const body = `## 🤖 Claude Code Review
-
-### 🔒 Security
-${security}
-
-### 🏗️ Architecture
-${architecture}
-
-### ✨ Code Quality
-${quality}
-
----
-*Triggered by /review command*`;
+            const body = [
+              '## 🤖 Claude Code Review',
+              '',
+              '### 🔒 Security',
+              security,
+              '',
+              '### 🏗️ Architecture',
+              architecture,
+              '',
+              '### ✨ Code Quality',
+              quality,
+              '',
+              '---',
+              '*Triggered by /review command*'
+            ].join('\n');
 
             await github.rest.issues.createComment({
               owner: context.repo.owner,
