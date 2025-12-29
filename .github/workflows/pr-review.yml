@@ -1,0 +1,221 @@
+name: PR Review
+
+on:
+  issue_comment:
+    types: [created]
+
+jobs:
+  review:
+    name: Claude Review
+    # Only run on PR comments containing /review
+    if: github.event.issue.pull_request && contains(github.event.comment.body, '/review')
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Acknowledge review request
+        uses: actions/github-script@v7
+        with:
+          script: |
+            await github.rest.reactions.createForIssueComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              comment_id: context.payload.comment.id,
+              content: 'eyes'
+            });
+
+      - name: Get PR details
+        id: pr
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const pr = await github.rest.pulls.get({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: context.issue.number
+            });
+            core.setOutput('head_sha', pr.data.head.sha);
+            core.setOutput('base_sha', pr.data.base.sha);
+            return pr.data;
+
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ steps.pr.outputs.head_sha }}
+
+      - name: Get diff
+        id: diff
+        run: |
+          DIFF=$(git diff ${{ steps.pr.outputs.base_sha }}..${{ steps.pr.outputs.head_sha }} -- '*.ts' '*.tsx' '*.js' '*.jsx')
+          echo "diff<<EOF" >> $GITHUB_OUTPUT
+          echo "$DIFF" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+
+      - name: Security Review
+        id: security
+        uses: actions/github-script@v7
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          DIFF: ${{ steps.diff.outputs.diff }}
+        with:
+          script: |
+            const response = await fetch('https://api.anthropic.com/v1/messages', {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'x-api-key': process.env.ANTHROPIC_API_KEY,
+                'anthropic-version': '2023-06-01'
+              },
+              body: JSON.stringify({
+                model: 'claude-sonnet-4-20250514',
+                max_tokens: 1024,
+                messages: [{
+                  role: 'user',
+                  content: `You are a security-focused code reviewer. Review this diff for security issues ONLY.
+
+            Focus on:
+            - Injection vulnerabilities (SQL, command, XSS)
+            - Secrets/credentials exposure
+            - Authentication/authorization issues
+            - Input validation problems
+            - Insecure dependencies or patterns
+
+            Be concise. If no security issues found, say "No security issues identified."
+            Format issues as a markdown list with severity (High/Medium/Low).
+
+            Diff:
+            \`\`\`diff
+            ${process.env.DIFF}
+            \`\`\``
+                }]
+              })
+            });
+            const data = await response.json();
+            return data.content[0].text;
+          result-encoding: string
+
+      - name: Architecture Review
+        id: architecture
+        uses: actions/github-script@v7
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          DIFF: ${{ steps.diff.outputs.diff }}
+        with:
+          script: |
+            const response = await fetch('https://api.anthropic.com/v1/messages', {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'x-api-key': process.env.ANTHROPIC_API_KEY,
+                'anthropic-version': '2023-06-01'
+              },
+              body: JSON.stringify({
+                model: 'claude-sonnet-4-20250514',
+                max_tokens: 1024,
+                messages: [{
+                  role: 'user',
+                  content: `You are an architecture-focused code reviewer for a DDD-based Node.js project.
+
+            Review this diff for architectural concerns ONLY.
+
+            Focus on:
+            - Domain-Driven Design adherence
+            - Separation of concerns
+            - Module boundaries and dependencies
+            - Pattern consistency (repository, service, provider patterns)
+            - Abstraction layers
+
+            Be concise. If architecture looks good, acknowledge what's done well briefly.
+            Format issues as a markdown list.
+
+            Diff:
+            \`\`\`diff
+            ${process.env.DIFF}
+            \`\`\``
+                }]
+              })
+            });
+            const data = await response.json();
+            return data.content[0].text;
+          result-encoding: string
+
+      - name: Code Quality Review
+        id: quality
+        uses: actions/github-script@v7
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          DIFF: ${{ steps.diff.outputs.diff }}
+        with:
+          script: |
+            const response = await fetch('https://api.anthropic.com/v1/messages', {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'x-api-key': process.env.ANTHROPIC_API_KEY,
+                'anthropic-version': '2023-06-01'
+              },
+              body: JSON.stringify({
+                model: 'claude-sonnet-4-20250514',
+                max_tokens: 1024,
+                messages: [{
+                  role: 'user',
+                  content: `You are a code quality reviewer for a TypeScript Node.js project.
+
+            Review this diff for code quality ONLY.
+
+            Focus on:
+            - TypeScript best practices and type safety
+            - Error handling
+            - Naming conventions and readability
+            - Code duplication
+            - Edge cases
+
+            Be concise. Highlight both issues and good practices.
+            Format as a markdown list.
+
+            Diff:
+            \`\`\`diff
+            ${process.env.DIFF}
+            \`\`\``
+                }]
+              })
+            });
+            const data = await response.json();
+            return data.content[0].text;
+          result-encoding: string
+
+      - name: Post Review Comments
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const security = `${{ steps.security.outputs.result }}`;
+            const architecture = `${{ steps.architecture.outputs.result }}`;
+            const quality = `${{ steps.quality.outputs.result }}`;
+
+            const body = `## 🤖 Claude Code Review
+
+            ### 🔒 Security
+            ${security}
+
+            ### 🏗️ Architecture
+            ${architecture}
+
+            ### ✨ Code Quality
+            ${quality}
+
+            ---
+            *Triggered by /review command*`;
+
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body: body
+            });
+
+            // Add checkmark reaction to indicate completion
+            await github.rest.reactions.createForIssueComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              comment_id: context.payload.comment.id,
+              content: 'rocket'
+            });
